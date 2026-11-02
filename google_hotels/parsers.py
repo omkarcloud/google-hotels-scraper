@@ -362,7 +362,6 @@ def _price_block(block, currency):
         return None
     currency = _at(block, 15) if isinstance(_at(block, 15), str) else currency
     breakdown = _at(block, 44)
-    price_range = _at(block, 7, 1, 0, 16)
     deal = _text(_at(block, 7, 3, 3, 0))
     nightly = _money(_at(block, 1), currency)
     total = _money(_at(block, 9), currency)
@@ -379,11 +378,6 @@ def _price_block(block, currency):
         "fees": _round2(_at(breakdown, 2)) if isinstance(breakdown, list) else None,
         "total_with_taxes_and_fees": _round2(_at(breakdown, 3)) if isinstance(breakdown, list) else None,
         "deal": deal,
-        "typical_range": {
-            "low": _text(_at(price_range, 0)),
-            "typical": _text(_at(price_range, 1)),
-            "high": _text(_at(price_range, 2)),
-        } if isinstance(price_range, list) and _text(_at(price_range, 0)) else None,
         "check_in": _iso_date(_at(block, 8, 0)),
         "check_out": _iso_date(_at(block, 8, 1)),
     }

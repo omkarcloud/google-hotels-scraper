@@ -22,13 +22,12 @@ Google Hotels Scraper is a **free and open-source** scraper that gets you **unli
   "reviews_count": 144377,
   "price": {
     "currency": "USD",
-    "nightly": { "amount": 197.3, "currency": "USD", "display": "$197" },
-    "base_price": 134.94,
-    "taxes": 18.06,
-    "fees": 62.36,
-    "total_with_taxes_and_fees": 215.36,
-    "deal": "39% less than usual",
-    "typical_range": { "low": "$197", "typical": "$172", "high": "$269" }
+    "nightly": { "amount": 203.55, "currency": "USD", "display": "$204" },
+    "base_price": 148.55,
+    "taxes": 26.47,
+    "fees": 55.0,
+    "total_with_taxes_and_fees": 230.02,
+    "deal": "35% less than usual"
   },
   "location": {
     "latitude": 36.1129455,
@@ -48,7 +47,7 @@ Google Hotels Scraper is a **free and open-source** scraper that gets you **unli
     "topics": [{ "name": "Nightlife", "mentions": 9582, "positive": 7684, "negative": 1098, "sentiment": 0.6 }],
     "source_ratings": [{ "name": "Tripadvisor", "rating": 4.0, "rating_max": 5, "reviews_count": 15992 }]
   },
-  "offers_count": 23
+  "offers_count": 22
 }
 ```
 
@@ -83,15 +82,15 @@ curl "http://localhost:8000/hotels/details?hotel=ChYIhJvEzt34sfmCARoJL20vMDMzYnh
   "reviews_count": 144377,
   "price": {
     "currency": "USD",
-    "nightly": { "amount": 197.3, "currency": "USD", "display": "$197" },
-    "taxes": 18.06,
-    "fees": 62.36,
-    "total_with_taxes_and_fees": 215.36,
-    "deal": "39% less than usual"
+    "nightly": { "amount": 203.55, "currency": "USD", "display": "$204" },
+    "taxes": 26.47,
+    "fees": 55.0,
+    "total_with_taxes_and_fees": 230.02,
+    "deal": "35% less than usual"
   },
   "location": { "address": "3600 S Las Vegas Blvd, Las Vegas, NV 89109", "neighborhood": "Las Vegas Strip" },
   "contact": { "phone": "(888) 987-6667", "website": "https://bellagio.mgmresorts.com/en.html?ecid=GMB_BE_HO" },
-  "offers_count": 23
+  "offers_count": 22
 }
 ```
 

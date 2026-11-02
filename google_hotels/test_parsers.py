@@ -223,7 +223,7 @@ def test_entity_price_and_offers(entity):
     assert price["nightly"]["amount"] == 6892.62 and price["nightly"]["display"] == "₹6,893"
     assert price["base_price"] == 6265.19 and price["taxes"] == 627.43 and price["fees"] == 0
     assert price["total_with_taxes_and_fees"] == 6892.62
-    assert price["typical_range"] == {"low": "₹6,893", "typical": "₹8,167", "high": "₹15,616"}
+    assert "typical_range" not in price   # [7][1][0][16] is not a reliable range (2026-11-02)
     assert price["deal"] == "42% less than usual"
     offers = entity["offers"]
     assert len(offers) == 12
