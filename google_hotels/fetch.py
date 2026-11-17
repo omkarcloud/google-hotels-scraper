@@ -3,9 +3,11 @@ cookies beyond the EU consent skip, no BotGuard (unlike Google Flights, the
 TravelFrontendUi hotel RPCs take a bare `f.req`). Egress: the pod's own IP
 (config.GOOGLE_HOTELS_EXIT, probed from the patchright pod 2026-10-31: every
 surface 200 direct, datacenter and residential alike); a 403 / 429 /
-captcha moves the thread to a datacenter exit for
-config.GOOGLE_HOTELS_DIRECT_COOLDOWN seconds, and every retryable failure
-drops the session so the retry rides a fresh connection.
+captcha moves the thread to config.GOOGLE_HOTELS_FALLBACK_EXIT for
+config.GOOGLE_HOTELS_DIRECT_COOLDOWN seconds — since 2026-11-11 the shared
+gateway exit ("gateway", a fresh gateway address per request), with a datacenter exit
+as the last retry of a call the gateway also failed — and every retryable
+failure drops the session so the retry rides a fresh connection.
 
 Upstream surfaces (validated 2026-10-30/31, scratchpad capture*/):
 
@@ -33,6 +35,7 @@ Failure taxonomy (scraper_errors, mapped to HTTP by route_glue):
   GoogleHotelsNotFound       unknown entity token                     — never retried
 """
 import json
+import fastjson
 import os
 import re
 import sys
@@ -48,6 +51,7 @@ import config
 import egress
 from scraper_errors import BadRequest, Blocked, NotFound, UpstreamError
 from google_hotels.refs import SITE
+from scraper_utils.pages import page_title as _page_title
 
 IMPERSONATE = "chrome"
 PAGE_TIMEOUT = 45      # entity pages are ~2.7 MB
@@ -99,7 +103,7 @@ def decode_chunks(text):
         if not line.startswith("[["):
             continue
         try:
-            envelopes = json.loads(line)
+            envelopes = fastjson.loads(line)
         except ValueError:
             continue
         for env in envelopes:
@@ -109,7 +113,7 @@ def decode_chunks(text):
                 raw = env[2] if len(env) > 2 else None
                 if isinstance(raw, str):
                     try:
-                        payloads.append(json.loads(raw))
+                        payloads.append(fastjson.loads(raw))
                     except ValueError:
                         pass
                 elif len(env) > 5 and isinstance(env[5], list) and env[5]:
@@ -124,7 +128,7 @@ def af_blobs(html):
     out = {}
     for key, raw in _AF_RE.findall(html or ""):
         try:
-            out[key] = json.loads(raw)
+            out[key] = fastjson.loads(raw)
         except ValueError:
             continue
     return out
@@ -153,18 +157,23 @@ class GoogleHotelsNotFound(NotFound):
 _local = threading.local()
 
 
-def _new_state(proxy, fallback_until=None):
-    from curl_cffi import requests as curl_requests
-    sess = curl_requests.Session(impersonate=IMPERSONATE)
-    if proxy:
-        sess.proxies = {"http": proxy, "https": proxy}
+def _new_state(proxy, fallback_until=None, once=False):
+    sess = egress.new_session(proxy, impersonate=IMPERSONATE)     # None, a proxy URL, or the gateway exit ("gateway")
     language = egress.accept_language(proxy)
+    page_headers = {**PAGE_HEADERS, "accept-language": language}
+    # a gateway session takes cookies from a Cookie header only: a per-request
+    # cookies= would be bound to the gateway's own host by the inner curl session
+    on_gateway = bool(config.gateway_exit(proxy))
+    if on_gateway:
+        page_headers["cookie"] = "; ".join(f"{k}={v}" for k, v in CONSENT_COOKIES.items())
     return {
         "session": sess,
         "proxy": proxy,
         "fallback_until": fallback_until,
+        "once": once,           # a last-retry session outside a cooldown: dropped when the call ends
         "rpc_headers": {**RPC_HEADERS, "accept-language": language},
-        "page_headers": {**PAGE_HEADERS, "accept-language": language},
+        "page_headers": page_headers,
+        "page_cookies": None if on_gateway else CONSENT_COOKIES,
     }
 
 
@@ -199,24 +208,49 @@ def _fallback_session():
         _local.state = _new_state(proxy, time.monotonic() + config.GOOGLE_HOTELS_DIRECT_COOLDOWN)
 
 
+def _last_retry_session():
+    """The last retry of a call the gateway exit failed: a datacenter exit,
+    so a gateway problem degrades to the pre-2026-11-11 behaviour. Inside a
+    block cooldown (the gateway was the fallback tier) the thread stays on
+    that exit for the rest of the cooldown, as it did before the gateway;
+    outside one (GOOGLE_HOTELS_EXIT itself names the gateway) only for this
+    call."""
+    state = getattr(_local, "state", None)
+    until = state["fallback_until"] if state else None
+    _drop_session()
+    _local.state = _new_state(config.google_hotels_fallback_proxy(last=True), until, once=until is None)
+
+
 def _retrying(fn, label):
-    """Run fn() under the shared retry policy: Blocked -> fallback exit,
-    other UpstreamErrors -> fresh session; BadRequest / NotFound surface
-    immediately."""
+    """Run fn() under the shared retry policy: Blocked -> fallback exit
+    (the gateway exit), other UpstreamErrors -> fresh session; BadRequest /
+    NotFound surface immediately. When the attempt before the last one
+    failed on the gateway, the last retry rides a datacenter exit
+    (_last_retry_session)."""
     last = None
-    for attempt in range(1, config.MAX_RETRIES + 1):
-        try:
-            return fn()
-        except GoogleHotelsBlocked as e:
-            last = e
-            _fallback_session()
-        except GoogleHotelsUpstreamError as e:
-            last = e
-            _drop_session()
-        print(f"google-hotels: {label} attempt {attempt}/{config.MAX_RETRIES} failed: {last}")
-        if attempt < config.MAX_RETRIES:
-            time.sleep(config.RETRY_BACKOFF * attempt)
-    raise last
+    try:
+        for attempt in range(1, config.MAX_RETRIES + 1):
+            try:
+                return fn()
+            except GoogleHotelsBlocked as e:
+                last, blocked = e, True
+            except GoogleHotelsUpstreamError as e:
+                last, blocked = e, False
+            state = getattr(_local, "state", None)
+            if attempt + 1 == config.MAX_RETRIES and state is not None and config.gateway_exit(state["proxy"]):
+                _last_retry_session()
+            elif blocked:
+                _fallback_session()
+            else:
+                _drop_session()
+            print(f"google-hotels: {label} attempt {attempt}/{config.MAX_RETRIES} failed: {last}")
+            if attempt < config.MAX_RETRIES:
+                time.sleep(config.RETRY_BACKOFF * attempt)
+        raise last
+    finally:
+        state = getattr(_local, "state", None)
+        if state is not None and state["once"]:
+            _drop_session()         # the next call starts on the configured exit again
 
 
 def _classify(resp, label):
@@ -284,10 +318,6 @@ def rpc(rpcid, inner, language=None, country=None):
 
 # ---- server-rendered entity pages ------------------------------------------------
 
-def _page_title(text):
-    match = _TITLE_RE.search(text or "")
-    return (match.group(1).strip() if match else "")
-
 
 def entity_page(token, subpage=None, ts=None, language=None, country=None):
     """GET /travel/hotels/entity/<token>[/<subpage>] -> (html, ds:1 data
@@ -304,7 +334,7 @@ def entity_page(token, subpage=None, ts=None, language=None, country=None):
     def once():
         state = _state()
         try:
-            resp = state["session"].get(url, headers=state["page_headers"], cookies=CONSENT_COOKIES,
+            resp = state["session"].get(url, headers=state["page_headers"], cookies=state["page_cookies"],
                                         timeout=PAGE_TIMEOUT, allow_redirects=True)
         except Exception as e:
             raise GoogleHotelsUpstreamError(f"{label}: request failed: {type(e).__name__}: {e}")

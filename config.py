@@ -33,8 +33,14 @@ def google_hotels_proxy():
     return os.environ.get("GOOGLE_HOTELS_PROXY") or None
 
 
-def google_hotels_fallback_proxy():
+def google_hotels_fallback_proxy(*args, **kwargs):
     """Where a blocked session moves for the cooldown: the same proxy (a
     rotating proxy hands out a fresh IP per connection), or None = just
     reconnect."""
     return os.environ.get("GOOGLE_HOTELS_PROXY") or None
+
+
+# ---- added by the sync: defaults for a direct run ----
+def gateway_exit(exit=None):
+    return None
+
